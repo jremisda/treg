@@ -2073,7 +2073,9 @@ async def _refresh_call(client, key) -> bool:
     settings exactly as the relay does it."""
     try:
         from . import oauth_providers
+        from .application.call.evidence import redact_answer
         from .infra.upstream import pathsegment
+        from .models import Tool
 
         provider = oauth_providers.get(key.provider)
         secret_value = get_settings().platform_key_for(key.provider)
@@ -2082,7 +2084,8 @@ async def _refresh_call(client, key) -> bool:
         headers: dict[str, str] = dict(key.req_headers or {})  # replay what keyed the question
         params: list = []
         path_values: dict[str, str] = {}
-        for binding in oauth_providers.platform_bindings(provider):
+        bindings = oauth_providers.platform_bindings(provider)
+        for binding in bindings:
             value = get_settings().platform_credential(
                 binding.get("platform_setting", ""), binding.get("account"))
             fmt = binding.get("format") or "{secret}"
@@ -2096,10 +2099,10 @@ async def _refresh_call(client, key) -> bool:
         url = pathsegment.fill(key.req_url, path_values)
         resp = await client.request(key.req_method or "GET", url, params=params or None,
                                     headers=headers, content=key.req_body or None)
-        body = resp.content
         if not (200 <= resp.status_code < 300):
             _log.warning("archive refresh got %s for %s", resp.status_code, key.endpoint_id)
             return False
+        body = redact_answer(resp.content, Tool(bindings=bindings), {})
         record(method=key.req_method or "GET", endpoint_id=key.endpoint_id,
                provider=key.provider, url=key.req_url, caller_body=key.req_body or b"",
                headers=dict(key.req_headers or {}), status_code=resp.status_code,
